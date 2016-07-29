@@ -1,17 +1,24 @@
 # Copyright (C) 2015 JWCrypto Project Contributors - see LICENSE file
 
+import os
+import struct
+import zlib
+
 from binascii import hexlify, unhexlify
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import constant_time, hashes, hmac
-from cryptography.hazmat.primitives.padding import PKCS7
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from jwcrypto.common import base64url_encode, base64url_decode
+from cryptography.hazmat.primitives.kdf.concatkdf import ConcatKDFHash
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.padding import PKCS7
+
 from jwcrypto.common import InvalidJWAAlgorithm
+from jwcrypto.common import base64url_decode, base64url_encode
 from jwcrypto.common import json_decode, json_encode
 from jwcrypto.jwk import JWK
-import os
-import zlib
 
 
 # RFC 7516 - 4.1
@@ -49,12 +56,12 @@ default_allowed_algs = [
 # Note: l is the number of bits, which should be a multiple of 16
 def _encode_int(n, l):
     e = hex(n).rstrip("L").lstrip("0x")
-    el = len(e)
-    L = ((l + 7) // 8) * 2  # number of bytes rounded up times 2 chars/bytes
-    if el > L:
-        e = e[:L]
+    elen = len(e)
+    ilen = ((l + 7) // 8) * 2  # number of bytes rounded up times 2 chars/bytes
+    if elen > ilen:
+        e = e[:ilen]
     else:
-        e = '0' * (L - el) + e  # pad as necessary
+        e = '0' * (ilen - elen) + e  # pad as necessary
     return unhexlify(e)
 
 
@@ -134,47 +141,84 @@ class InvalidJWEKeyLength(Exception):
         super(InvalidJWEKeyLength, self).__init__(msg)
 
 
-class _raw_key_mgmt(object):
+class _RawKeyMgmt(object):
 
-    def wrap(self, key, keylen, cek):
+    def wrap(self, key, keylen, cek, headers):
         raise NotImplementedError
 
-    def unwrap(self, key, ek):
+    def unwrap(self, key, keylen, ek, headers):
         raise NotImplementedError
 
 
-class _rsa(_raw_key_mgmt):
+class _RSA(_RawKeyMgmt):
 
     def __init__(self, padfn):
         self.padfn = padfn
 
-    def check_key(self, key):
+    def _check_key(self, key):
+        if not isinstance(key, JWK):
+            raise ValueError('key is not a JWK object')
         if key.key_type != 'RSA':
             raise InvalidJWEKeyType('RSA', key.key_type)
 
     # FIXME: get key size and insure > 2048 bits
-    def wrap(self, key, keylen, cek):
-        self.check_key(key)
+    def wrap(self, key, keylen, cek, headers):
+        self._check_key(key)
         if not cek:
             cek = os.urandom(keylen)
-        rk = key.get_op_key('encrypt')
+        rk = key.get_op_key('wrapKey')
         ek = rk.encrypt(cek, self.padfn)
-        return (cek, ek)
+        return {'cek': cek, 'ek': ek}
 
-    def unwrap(self, key, ek):
-        self.check_key(key)
+    def unwrap(self, key, keylen, ek, headers):
+        self._check_key(key)
         rk = key.get_op_key('decrypt')
         cek = rk.decrypt(ek, self.padfn)
+        if len(cek) != keylen:
+            raise InvalidJWEKeyLength(keylen, len(cek))
         return cek
 
 
-class _aes_kw(_raw_key_mgmt):
+class _Rsa15(_RSA):
+    def __init__(self):
+        super(_Rsa15, self).__init__(padding.PKCS1v15())
+
+    @property
+    def name(self):
+        return 'RSA1_5'
+
+
+class _RsaOaep(_RSA):
+    def __init__(self):
+        super(_RsaOaep, self).__init__(
+            padding.OAEP(padding.MGF1(hashes.SHA1()),
+                         hashes.SHA1(), None))
+
+    @property
+    def name(self):
+        return 'RSA-OAEP'
+
+
+class _RsaOaep256(_RSA):  # noqa: ignore=N801
+    def __init__(self):
+        super(_RsaOaep256, self).__init__(
+            padding.OAEP(padding.MGF1(hashes.SHA256()),
+                         hashes.SHA256(), None))
+
+    @property
+    def name(self):
+        return 'RSA-OAEP-256'
+
+
+class _AesKw(_RawKeyMgmt):
 
     def __init__(self, keysize):
         self.backend = default_backend()
         self.keysize = keysize // 8
 
-    def get_key(self, key, op):
+    def _get_key(self, key, op):
+        if not isinstance(key, JWK):
+            raise ValueError('key is not a JWK object')
         if key.key_type != 'oct':
             raise InvalidJWEKeyType('oct', key.key_type)
         rk = base64url_decode(key.get_op_key(op))
@@ -182,79 +226,402 @@ class _aes_kw(_raw_key_mgmt):
             raise InvalidJWEKeyLength(self.keysize * 8, len(rk) * 8)
         return rk
 
-    def wrap(self, key, keylen, cek):
-        rk = self.get_key(key, 'encrypt')
+    def wrap(self, key, keylen, cek, headers):
+        rk = self._get_key(key, 'encrypt')
         if not cek:
             cek = os.urandom(keylen)
 
         # Implement RFC 3394 Key Unwrap - 2.2.2
         # TODO: Use cryptography once issue #1733 is resolved
         iv = 'a6a6a6a6a6a6a6a6'
-        A = unhexlify(iv)
-        R = [cek[i:i+8] for i in range(0, len(cek), 8)]
-        n = len(R)
+        a = unhexlify(iv)
+        r = [cek[i:i + 8] for i in range(0, len(cek), 8)]
+        n = len(r)
         for j in range(0, 6):
             for i in range(0, n):
                 e = Cipher(algorithms.AES(rk), modes.ECB(),
                            backend=self.backend).encryptor()
-                B = e.update(A + R[i]) + e.finalize()
-                A = _encode_int(_decode_int(B[:8]) ^ ((n*j)+i+1), 64)
-                R[i] = B[-8:]
-        ek = A
+                b = e.update(a + r[i]) + e.finalize()
+                a = _encode_int(_decode_int(b[:8]) ^ ((n * j) + i + 1), 64)
+                r[i] = b[-8:]
+        ek = a
         for i in range(0, n):
-            ek += R[i]
-        return (cek, ek)
+            ek += r[i]
+        return {'cek': cek, 'ek': ek}
 
-    def unwrap(self, key, ek):
-        rk = self.get_key(key, 'decrypt')
+    def unwrap(self, key, keylen, ek, headers):
+        rk = self._get_key(key, 'decrypt')
 
         # Implement RFC 3394 Key Unwrap - 2.2.3
         # TODO: Use cryptography once issue #1733 is resolved
         iv = 'a6a6a6a6a6a6a6a6'
-        Aiv = unhexlify(iv)
+        aiv = unhexlify(iv)
 
-        R = [ek[i:i+8] for i in range(0, len(ek), 8)]
-        A = R.pop(0)
-        n = len(R)
+        r = [ek[i:i + 8] for i in range(0, len(ek), 8)]
+        a = r.pop(0)
+        n = len(r)
         for j in range(5, -1, -1):
             for i in range(n - 1, -1, -1):
-                AtR = _encode_int((_decode_int(A) ^ ((n*j)+i+1)), 64) + R[i]
+                da = _decode_int(a)
+                atr = _encode_int((da ^ ((n * j) + i + 1)), 64) + r[i]
                 d = Cipher(algorithms.AES(rk), modes.ECB(),
                            backend=self.backend).decryptor()
-                B = d.update(AtR) + d.finalize()
-                A = B[:8]
-                R[i] = B[-8:]
+                b = d.update(atr) + d.finalize()
+                a = b[:8]
+                r[i] = b[-8:]
 
-        if A != Aiv:
+        if a != aiv:
             raise InvalidJWEData('Decryption Failed')
 
-        cek = b''.join(R)
+        cek = b''.join(r)
+        if len(cek) != keylen:
+            raise InvalidJWEKeyLength(keylen, len(cek))
         return cek
 
 
-class _direct(_raw_key_mgmt):
+class _A128KW(_AesKw):
+    def __init__(self):
+        super(_A128KW, self).__init__(128)
 
-    def check_key(self, key):
+    @property
+    def name(self):
+        return 'A128KW'
+
+
+class _A192KW(_AesKw):
+    def __init__(self):
+        super(_A192KW, self).__init__(192)
+
+    @property
+    def name(self):
+        return 'A192KW'
+
+
+class _A256KW(_AesKw):
+    def __init__(self):
+        super(_A256KW, self).__init__(256)
+
+    @property
+    def name(self):
+        return 'A256KW'
+
+
+class _AesGcmKw(_RawKeyMgmt):
+
+    def __init__(self, keysize):
+        self.backend = default_backend()
+        self.keysize = keysize // 8
+
+    def _get_key(self, key, op):
+        if not isinstance(key, JWK):
+            raise ValueError('key is not a JWK object')
+        if key.key_type != 'oct':
+            raise InvalidJWEKeyType('oct', key.key_type)
+        rk = base64url_decode(key.get_op_key(op))
+        if len(rk) != self.keysize:
+            raise InvalidJWEKeyLength(self.keysize * 8, len(rk) * 8)
+        return rk
+
+    def wrap(self, key, keylen, cek, headers):
+        rk = self._get_key(key, 'encrypt')
+        if not cek:
+            cek = os.urandom(keylen)
+
+        iv = os.urandom(96 // 8)
+        cipher = Cipher(algorithms.AES(rk), modes.GCM(iv),
+                        backend=self.backend)
+        encryptor = cipher.encryptor()
+        ek = encryptor.update(cek) + encryptor.finalize()
+
+        tag = encryptor.tag
+        return {'cek': cek, 'ek': ek,
+                'header': {'iv': base64url_encode(iv),
+                           'tag': base64url_encode(tag)}}
+
+    def unwrap(self, key, keylen, ek, headers):
+        rk = self._get_key(key, 'decrypt')
+
+        if 'iv' not in headers:
+            raise InvalidJWEData('Invalid Header, missing "iv" parameter')
+        iv = base64url_decode(headers['iv'])
+        if 'tag' not in headers:
+            raise InvalidJWEData('Invalid Header, missing "tag" parameter')
+        tag = base64url_decode(headers['tag'])
+
+        cipher = Cipher(algorithms.AES(rk), modes.GCM(iv, tag),
+                        backend=self.backend)
+        decryptor = cipher.decryptor()
+        cek = decryptor.update(ek) + decryptor.finalize()
+        if len(cek) != keylen:
+            raise InvalidJWEKeyLength(keylen, len(cek))
+        return cek
+
+
+class _A128GcmKw(_AesGcmKw):
+    def __init__(self):
+        super(_A128GcmKw, self).__init__(128)
+
+    @property
+    def name(self):
+        return 'A128GCMKW'
+
+
+class _A192GcmKw(_AesGcmKw):
+    def __init__(self):
+        super(_A192GcmKw, self).__init__(192)
+
+    @property
+    def name(self):
+        return 'A192GCMKW'
+
+
+class _A256GcmKw(_AesGcmKw):
+    def __init__(self):
+        super(_A256GcmKw, self).__init__(256)
+
+    @property
+    def name(self):
+        return 'A256GCMKW'
+
+
+class _Pbes2HsAesKw(_RawKeyMgmt):
+
+    @property
+    def name(self):
+        raise NotImplementedError
+
+    def __init__(self, hashsize, keysize):
+        self.backend = default_backend()
+        self.hashsize = hashsize
+        self.keysize = keysize // 8
+
+    def _get_key(self, alg, key, p2s, p2c):
+        if isinstance(key, bytes):
+            plain = key
+        else:
+            plain = key.encode('utf8')
+        salt = bytes(self.name.encode('utf8')) + b'\x00' + p2s
+
+        if self.hashsize == 256:
+            hashalg = hashes.SHA256()
+        elif self.hashsize == 384:
+            hashalg = hashes.SHA384()
+        elif self.hashsize == 512:
+            hashalg = hashes.SHA512()
+        else:
+            raise InvalidJWEData('Unknown Hash Size')
+
+        kdf = PBKDF2HMAC(algorithm=hashalg, length=self.keysize, salt=salt,
+                         iterations=p2c, backend=self.backend)
+        rk = kdf.derive(plain)
+        if len(rk) != self.keysize:
+            raise InvalidJWEKeyLength(self.keysize * 8, len(rk) * 8)
+        return JWK(kty="oct", use="enc", k=base64url_encode(rk))
+
+    def wrap(self, key, keylen, cek, headers):
+        p2s = os.urandom(16)
+        p2c = 8192
+        kek = self._get_key(headers['alg'], key, p2s, p2c)
+
+        aeskw = _AesKw(self.keysize * 8)
+        ret = aeskw.wrap(kek, keylen, cek, headers)
+        ret['header'] = {'p2s': base64url_encode(p2s), 'p2c': p2c}
+        return ret
+
+    def unwrap(self, key, keylen, ek, headers):
+        if 'p2s' not in headers:
+            raise InvalidJWEData('Invalid Header, missing "p2s" parameter')
+        if 'p2c' not in headers:
+            raise InvalidJWEData('Invalid Header, missing "p2c" parameter')
+        p2s = base64url_decode(headers['p2s'])
+        p2c = headers['p2c']
+        kek = self._get_key(headers['alg'], key, p2s, p2c)
+
+        aeskw = _AesKw(self.keysize * 8)
+        return aeskw.unwrap(kek, keylen, ek, headers)
+
+
+class _Pbes2Hs256A128Kw(_Pbes2HsAesKw):
+    def __init__(self):
+        super(_Pbes2Hs256A128Kw, self).__init__(256, 128)
+
+    @property
+    def name(self):
+        return 'PBES2-HS256+A128KW'
+
+
+class _Pbes2Hs384A192Kw(_Pbes2HsAesKw):
+    def __init__(self):
+        super(_Pbes2Hs384A192Kw, self).__init__(384, 192)
+
+    @property
+    def name(self):
+        return 'PBES2-HS384+A192KW'
+
+
+class _Pbes2Hs512A256Kw(_Pbes2HsAesKw):
+    def __init__(self):
+        super(_Pbes2Hs512A256Kw, self).__init__(512, 256)
+
+    @property
+    def name(self):
+        return 'PBES2-HS512+A256KW'
+
+
+class _Direct(_RawKeyMgmt):
+
+    @property
+    def name(self):
+        return 'dir'
+
+    def _check_key(self, key):
+        if not isinstance(key, JWK):
+            raise ValueError('key is not a JWK object')
         if key.key_type != 'oct':
             raise InvalidJWEKeyType('oct', key.key_type)
 
-    def wrap(self, key, keylen, cek):
-        self.check_key(key)
+    def wrap(self, key, keylen, cek, headers):
+        self._check_key(key)
         if cek:
             return (cek, None)
         k = base64url_decode(key.get_op_key('encrypt'))
         if len(k) != keylen:
             raise InvalidCEKeyLength(keylen, len(k))
-        return (k, '')
+        return {'cek': k}
 
-    def unwrap(self, key, ek):
-        self.check_key(key)
+    def unwrap(self, key, keylen, ek, headers):
+        self._check_key(key)
         if ek != b'':
             raise InvalidJWEData('Invalid Encryption Key.')
-        return base64url_decode(key.get_op_key('decrypt'))
+        cek = base64url_decode(key.get_op_key('decrypt'))
+        if len(cek) != keylen:
+            raise InvalidJWEKeyLength(keylen, len(cek))
+        return cek
 
 
-class _raw_jwe(object):
+class _EcdhEs(_RawKeyMgmt):
+
+    @property
+    def name(self):
+        return 'ECDH-ES'
+
+    def __init__(self, keydatalen=None):
+        self.backend = default_backend()
+        self.keydatalen = keydatalen
+
+    def _check_key(self, key):
+        if not isinstance(key, JWK):
+            raise ValueError('key is not a JWK object')
+        if key.key_type != 'EC':
+            raise InvalidJWEKeyType('EC', key.key_type)
+
+    def _derive(self, privkey, pubkey, alg, keydatalen, headers):
+        # OtherInfo is defined in NIST SP 56A 5.8.1.2.1
+
+        # AlgorithmID
+        otherinfo = struct.pack('>I', len(alg))
+        otherinfo += bytes(alg.encode('utf8'))
+
+        # PartyUInfo
+        apu = base64url_decode(headers['apu']) if 'apu' in headers else b''
+        otherinfo += struct.pack('>I', len(apu))
+        otherinfo += apu
+
+        # PartyVInfo
+        apv = base64url_decode(headers['apv']) if 'apv' in headers else b''
+        otherinfo += struct.pack('>I', len(apv))
+        otherinfo += apv
+
+        # SuppPubInfo
+        otherinfo += struct.pack('>I', keydatalen)
+
+        # no SuppPrivInfo
+
+        shared_key = privkey.exchange(ec.ECDH(), pubkey)
+        ckdf = ConcatKDFHash(algorithm=hashes.SHA256(),
+                             length=keydatalen // 8,
+                             otherinfo=otherinfo,
+                             backend=self.backend)
+        return ckdf.derive(shared_key)
+
+    def wrap(self, key, keylen, cek, headers):
+        self._check_key(key)
+        if self.keydatalen is None:
+            if cek is not None:
+                raise InvalidJWEOperation('ECDH-ES cannot use an existing CEK')
+            keydatalen = keylen * 8
+            alg = headers['enc']
+        else:
+            keydatalen = self.keydatalen
+            alg = headers['alg']
+
+        epk = JWK.generate(kty=key.key_type, crv=key.key_curve)
+        dk = self._derive(epk.get_op_key('unwrapKey'),
+                          key.get_op_key('wrapKey'),
+                          alg, keydatalen, headers)
+
+        if self.keydatalen is None:
+            ret = {'cek': dk}
+        else:
+            aeskw = _AesKw(keydatalen)
+            kek = JWK(kty="oct", use="enc", k=base64url_encode(dk))
+            ret = aeskw.wrap(kek, keydatalen // 8, cek, headers)
+
+        ret['header'] = {'epk': json_decode(epk.export_public())}
+        return ret
+
+    def unwrap(self, key, keylen, ek, headers):
+        if 'epk' not in headers:
+            raise InvalidJWEData('Invalid Header, missing "epk" parameter')
+        self._check_key(key)
+        if self.keydatalen is None:
+            keydatalen = keylen * 8
+            alg = headers['enc']
+        else:
+            keydatalen = self.keydatalen
+            alg = headers['alg']
+
+        epk = JWK(**headers['epk'])
+        dk = self._derive(key.get_op_key('unwrapKey'),
+                          epk.get_op_key('wrapKey'),
+                          alg, keydatalen, headers)
+        if self.keydatalen is None:
+            return dk
+        else:
+            aeskw = _AesKw(keydatalen)
+            kek = JWK(kty="oct", use="enc", k=base64url_encode(dk))
+            cek = aeskw.unwrap(kek, keydatalen // 8, ek, headers)
+            return cek
+
+
+class _EcdhEsAes128Kw(_EcdhEs):
+    def __init__(self):
+        super(_EcdhEsAes128Kw, self).__init__(128)
+
+    @property
+    def name(self):
+        return 'ECDH-ES+A128KW'
+
+
+class _EcdhEsAes192Kw(_EcdhEs):
+    def __init__(self):
+        super(_EcdhEsAes192Kw, self).__init__(192)
+
+    @property
+    def name(self):
+        return 'ECDH-ES+A192KW'
+
+
+class _EcdhEsAes256Kw(_EcdhEs):
+    def __init__(self):
+        super(_EcdhEsAes256Kw, self).__init__(256)
+
+    @property
+    def name(self):
+        return 'ECDH-ES+A256KW'
+
+
+class _RawJWE(object):
 
     def encrypt(self, k, a, m):
         raise NotImplementedError
@@ -263,7 +630,7 @@ class _raw_jwe(object):
         raise NotImplementedError
 
 
-class _aes_cbc_hmac_sha2(_raw_jwe):
+class _AesCbcHmacSha2(_RawJWE):
 
     def __init__(self, hashfn, keybits):
         self.backend = default_backend()
@@ -340,7 +707,34 @@ class _aes_cbc_hmac_sha2(_raw_jwe):
         return unpadder.update(d) + unpadder.finalize()
 
 
-class _aes_gcm(_raw_jwe):
+class _A128CbcHs256(_AesCbcHmacSha2):
+    def __init__(self):
+        super(_A128CbcHs256, self).__init__(hashes.SHA256(), 128)
+
+    @property
+    def name(self):
+        return 'A128CBC-HS256'
+
+
+class _A192CbcHs384(_AesCbcHmacSha2):
+    def __init__(self):
+        super(_A192CbcHs384, self).__init__(hashes.SHA384(), 192)
+
+    @property
+    def name(self):
+        return 'A192CBC-HS384'
+
+
+class _A256CbcHs512(_AesCbcHmacSha2):
+    def __init__(self):
+        super(_A256CbcHs512, self).__init__(hashes.SHA512(), 256)
+
+    @property
+    def name(self):
+        return 'A256CBC-HS512'
+
+
+class _AesGcm(_RawJWE):
 
     def __init__(self, keybits):
         self.backend = default_backend()
@@ -388,11 +782,64 @@ class _aes_gcm(_raw_jwe):
         return decryptor.update(e) + decryptor.finalize()
 
 
+class _A128Gcm(_AesGcm):
+    def __init__(self):
+        super(_A128Gcm, self).__init__(128)
+
+    @property
+    def name(self):
+        return 'A128GCM'
+
+
+class _A192Gcm(_AesGcm):
+    def __init__(self):
+        super(_A192Gcm, self).__init__(192)
+
+    @property
+    def name(self):
+        return 'A192GCM'
+
+
+class _A256Gcm(_AesGcm):
+    def __init__(self):
+        super(_A256Gcm, self).__init__(256)
+
+    @property
+    def name(self):
+        return 'A256GCM'
+
+
 class JWE(object):
     """JSON Web Encryption object
 
     This object represent a JWE token.
     """
+
+    jwas = {
+        'RSA1_5': _Rsa15,
+        'RSA-OAEP': _RsaOaep,
+        'RSA-OAEP-256': _RsaOaep256,
+        'A128KW': _A128KW,
+        'A192KW': _A192KW,
+        'A256KW': _A256KW,
+        'dir': _Direct,
+        'ECDH-ES': _EcdhEs,
+        'ECDH-ES+A128KW': _EcdhEsAes128Kw,
+        'ECDH-ES+A192KW': _EcdhEsAes192Kw,
+        'ECDH-ES+A256KW': _EcdhEsAes256Kw,
+        'A128GCMKW': _A128GcmKw,
+        'A192GCMKW': _A192GcmKw,
+        'A256GCMKW': _A256GcmKw,
+        'PBES2-HS256+A128KW': _Pbes2Hs256A128Kw,
+        'PBES2-HS384+A192KW': _Pbes2Hs384A192Kw,
+        'PBES2-HS512+A256KW': _Pbes2Hs512A256Kw,
+        'A128CBC-HS256': _A128CbcHs256,
+        'A192CBC-HS384': _A192CbcHs384,
+        'A256CBC-HS512': _A256CbcHs512,
+        'A128GCM': _A128Gcm,
+        'A192GCM': _A192Gcm,
+        'A256GCM': _A256Gcm
+    }
 
     def __init__(self, plaintext=None, protected=None, unprotected=None,
                  aad=None, algs=None):
@@ -417,69 +864,23 @@ class JWE(object):
         if aad:
             self.objects['aad'] = aad
         if protected:
-            _ = json_decode(protected)  # check header encoding
+            json_decode(protected)  # check header encoding
             self.objects['protected'] = protected
         if unprotected:
-            _ = json_decode(unprotected)  # check header encoding
+            json_decode(unprotected)  # check header encoding
             self.objects['unprotected'] = unprotected
         if algs:
             self.allowed_algs = algs
 
-    # key wrapping mechanisms
-    def _jwa_RSA1_5(self):
-        return _rsa(padding.PKCS1v15())
-
-    def _jwa_RSA_OAEP(self):
-        return _rsa(padding.OAEP(padding.MGF1(hashes.SHA1()),
-                                 hashes.SHA1(),
-                                 None))
-
-    def _jwa_RSA_OAEP_256(self):
-        return _rsa(padding.OAEP(padding.MGF1(hashes.SHA256()),
-                                 hashes.SHA256(),
-                                 None))
-
-    def _jwa_A128KW(self):
-        return _aes_kw(128)
-
-    def _jwa_A192KW(self):
-        return _aes_kw(192)
-
-    def _jwa_A256KW(self):
-        return _aes_kw(256)
-
-    def _jwa_dir(self):
-        return _direct()
-
-    # content encryption mechanisms
-    def _jwa_A128CBC_HS256(self):
-        return _aes_cbc_hmac_sha2(hashes.SHA256(), 128)
-
-    def _jwa_A192CBC_HS384(self):
-        return _aes_cbc_hmac_sha2(hashes.SHA384(), 192)
-
-    def _jwa_A256CBC_HS512(self):
-        return _aes_cbc_hmac_sha2(hashes.SHA512(), 256)
-
-    def _jwa_A128GCM(self):
-        return _aes_gcm(128)
-
-    def _jwa_A192GCM(self):
-        return _aes_gcm(192)
-
-    def _jwa_A256GCM(self):
-        return _aes_gcm(256)
-
     def _jwa(self, name):
         try:
-            attr = '_jwa_%s' % name.replace('-', '_').replace('+', '_')
-            fn = getattr(self, attr)
-        except (KeyError, AttributeError):
+            cls = self.jwas[name]
+        except (KeyError):
             raise InvalidJWAAlgorithm()
         allowed = self._allowed_algs or default_allowed_algs
         if name not in allowed:
             raise InvalidJWEOperation('Algorithm not allowed')
-        return fn()
+        return cls()
 
     @property
     def allowed_algs(self):
@@ -531,15 +932,33 @@ class JWE(object):
         enc = self._jwa(encname)
         return alg, enc
 
+    def _encrypt(self, alg, enc, jh):
+        aad = base64url_encode(self.objects.get('protected', ''))
+        if 'aad' in self.objects:
+            aad += '.' + base64url_encode(self.objects['aad'])
+        aad = aad.encode('utf-8')
+
+        compress = jh.get('zip', None)
+        if compress == 'DEF':
+            data = zlib.compress(self.plaintext)[2:-4]
+        elif compress is None:
+            data = self.plaintext
+        else:
+            raise ValueError('Unknown compression')
+
+        iv, ciphertext, tag = enc.encrypt(self.cek, aad, data)
+        self.objects['iv'] = iv
+        self.objects['ciphertext'] = ciphertext
+        self.objects['tag'] = tag
+
     def add_recipient(self, key, header=None):
         """Encrypt the plaintext with the given key.
 
-        :param key: A JWK key of appropriate type for the 'alg' provided
-         in the JOSE Headers.
+        :param key: A JWK key or password of appropriate type for the 'alg'
+         provided in the JOSE Headers.
         :param header: A JSON string representing the per-recipient header.
 
         :raises ValueError: if the plaintext is missing or not of type bytes.
-        :raises ValueError: if the key is not a JWK object.
         :raises ValueError: if the compression type is unknown.
         :raises InvalidJWAAlgorithm: if the 'alg' provided in the JOSE
          headers is missing or unknown, or otherwise not implemented.
@@ -548,8 +967,6 @@ class JWE(object):
             raise ValueError('Missing plaintext')
         if not isinstance(self.plaintext, bytes):
             raise ValueError("Plaintext must be 'bytes'")
-        if not isinstance(key, JWK):
-            raise ValueError('key is not a JWK object')
 
         jh = self._get_jose_header(header)
         alg, enc = self._get_alg_enc_from_headers(jh)
@@ -558,28 +975,19 @@ class JWE(object):
         if header:
             rec['header'] = header
 
-        self.cek, ek = alg.wrap(key, enc.key_size, self.cek)
-        if ek:
-            rec['encrypted_key'] = ek
+        wrapped = alg.wrap(key, enc.key_size, self.cek, jh)
+        self.cek = wrapped['cek']
+
+        if 'ek' in wrapped:
+            rec['encrypted_key'] = wrapped['ek']
+
+        if 'header' in wrapped:
+            h = json_decode(rec.get('header', '{}'))
+            nh = self._merge_headers(h, wrapped['header'])
+            rec['header'] = json_encode(nh)
 
         if 'ciphertext' not in self.objects:
-            aad = base64url_encode(self.objects.get('protected', ''))
-            if 'aad' in self.objects:
-                aad += '.' + base64url_encode(self.objects['aad'])
-            aad = aad.encode('utf-8')
-
-            compress = jh.get('zip', None)
-            if compress == 'DEF':
-                data = zlib.compress(self.plaintext)[2:-4]
-            elif compress is None:
-                data = self.plaintext
-            else:
-                raise ValueError('Unknown compression')
-
-            iv, ciphertext, tag = enc.encrypt(self.cek, aad, data)
-            self.objects['iv'] = iv
-            self.objects['ciphertext'] = ciphertext
-            self.objects['tag'] = tag
+            self._encrypt(alg, enc, jh)
 
         if 'recipients' in self.objects:
             self.objects['recipients'].append(rec)
@@ -622,6 +1030,20 @@ class JWE(object):
                 rec = self.objects['recipients'][0]
             else:
                 rec = self.objects
+            if 'header' in rec:
+                # The AESGCMKW algorithm generates data (iv, tag) we put in the
+                # per-recipient unpotected header by default. Move it to the
+                # protected header and re-encrypt the payload, as the protected
+                # header is used as additional authenticated data.
+                h = json_decode(rec['header'])
+                ph = json_decode(self.objects['protected'])
+                nph = self._merge_headers(h, ph)
+                self.objects['protected'] = json_encode(nph)
+                jh = self._get_jose_header()
+                alg, enc = self._get_alg_enc_from_headers(jh)
+                self._encrypt(alg, enc, jh)
+                del rec['header']
+
             return '.'.join([base64url_encode(self.objects['protected']),
                              base64url_encode(rec.get('encrypted_key', '')),
                              base64url_encode(self.objects['iv']),
@@ -680,7 +1102,7 @@ class JWE(object):
         if 'aad' in self.objects:
             aad += '.' + base64url_encode(self.objects['aad'])
 
-        cek = alg.unwrap(key, ppe.get('encrypted_key', b''))
+        cek = alg.unwrap(key, enc.key_size, ppe.get('encrypted_key', b''), jh)
         data = enc.decrypt(cek, aad.encode('utf-8'),
                            self.objects['iv'],
                            self.objects['ciphertext'],
@@ -701,14 +1123,14 @@ class JWE(object):
         """Decrypt a JWE token.
 
         :param key: The (:class:`jwcrypto.jwk.JWK`) decryption key.
+        :param key: A (:class:`jwcrypto.jwk.JWK`) decryption key or a password
+         string (optional).
 
         :raises InvalidJWEOperation: if the key is not a JWK object.
         :raises InvalidJWEData: if the ciphertext can't be decrypted or
          the object is otherwise malformed.
         """
 
-        if not isinstance(key, JWK):
-            raise ValueError('key is not a JWK object')
         if 'ciphertext' not in self.objects:
             raise InvalidJWEOperation("No available ciphertext")
         self.decryptlog = list()
@@ -737,8 +1159,9 @@ class JWE(object):
 
         :param raw_jwe: a 'raw' JWE token (JSON Encoded or Compact
          notation) string.
-        :param key: A (:class:`jwcrypto.jwk.JWK`) decryption key (optional).
-         If a key is provided a idecryption step will be attempted after
+        :param key: A (:class:`jwcrypto.jwk.JWK`) decryption key or a password
+         string (optional).
+         If a key is provided a decryption step will be attempted after
          the object is successfully deserialized.
 
         :raises InvalidJWEData: if the raw object is an invaid JWE token.

@@ -1,7 +1,7 @@
 # Copyright (C) 2015 JWCrypto Project Contributors - see LICENSE file
 
-from base64 import urlsafe_b64encode, urlsafe_b64decode
 import json
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 
 
 # Padding stripping versions as described in
@@ -31,7 +31,7 @@ def base64url_decode(payload):
 def json_encode(string):
     if isinstance(string, bytes):
         string = string.decode('utf-8')
-    return json.dumps(string, separators=(',', ':'))
+    return json.dumps(string, separators=(',', ':'), sort_keys=True)
 
 
 def json_decode(string):

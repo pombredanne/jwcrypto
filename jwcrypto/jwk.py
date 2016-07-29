@@ -1,12 +1,19 @@
 # Copyright (C) 2015  JWCrypto Project Contributors - see LICENSE file
 
+import os
+
 from binascii import hexlify, unhexlify
+
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from six import iteritems
+
 from jwcrypto.common import base64url_decode, base64url_encode
 from jwcrypto.common import json_decode, json_encode
-import os
+
 
 # RFC 7518 - 7.4
 JWKTypesRegistry = {'EC': 'Elliptic Curve',
@@ -17,19 +24,21 @@ JWKTypesRegistry = {'EC': 'Elliptic Curve',
 # RFC 7518 - 7.5
 # It is part of the JWK Parameters Registry, but we want a more
 # specific map for internal usage
-JWKValuesRegistry = {'EC': {'crv': ('Curve', 'Public'),
-                            'x': ('X Coordinate', 'Public'),
-                            'y': ('Y Coordinate', 'Public'),
-                            'd': ('ECC Private Key', 'Private')},
-                     'RSA': {'n': ('Modulus', 'Public'),
-                             'e': ('Exponent', 'Public'),
-                             'd': ('Private Exponent', 'Private'),
-                             'p': ('First Prime Factor', 'Private'),
-                             'q': ('Second Prime Factor', 'Private'),
-                             'dp': ('First Factor CRT Exponent', 'Private'),
-                             'dq': ('Second Factor CRT Exponent', 'Private'),
-                             'qi': ('First CRT Coefficient', 'Private')},
-                     'oct': {'k': ('Key Value', 'Private')}}
+JWKValuesRegistry = {'EC': {'crv': ('Curve', 'Public', 'Required'),
+                            'x': ('X Coordinate', 'Public', 'Required'),
+                            'y': ('Y Coordinate', 'Public', 'Required'),
+                            'd': ('ECC Private Key', 'Private', None)},
+                     'RSA': {'n': ('Modulus', 'Public', 'Required'),
+                             'e': ('Exponent', 'Public', 'Required'),
+                             'd': ('Private Exponent', 'Private', None),
+                             'p': ('First Prime Factor', 'Private', None),
+                             'q': ('Second Prime Factor', 'Private', None),
+                             'dp': ('First Factor CRT Exponent', 'Private',
+                                    None),
+                             'dq': ('Second Factor CRT Exponent', 'Private',
+                                    None),
+                             'qi': ('First CRT Coefficient', 'Private', None)},
+                     'oct': {'k': ('Key Value', 'Private', 'Required')}}
 """Registry of valid key values"""
 
 JWKParamsRegistry = {'kty': ('Key Type', 'Public', ),
@@ -67,6 +76,10 @@ JWKOperationsRegistry = {'sign': 'Compute digital Signature or MAC',
                          'deriveKey': 'Derive key',
                          'deriveBits': 'Derive bits not to be used as a key'}
 """Registry of allowed operations"""
+
+JWKpycaCurveMap = {'secp256r1': 'P-256',
+                   'secp384r1': 'P-384',
+                   'secp521r1': 'P-521'}
 
 
 class InvalidJWKType(Exception):
@@ -166,14 +179,19 @@ class JWK(object):
         :data:`JWKTypesRegistry` variable. The valid key parameters per
         key type are defined in the :data:`JWKValuesregistry` variable.
 
-        Alternatively if the 'generate' parameter is provided, with a
-        valid key type as value then a new key will be generated according
-        to the defaults or provided key strenght options (type specific).
+        To generate a new random key call the class method generate() with
+        the appropriate 'kty' parameter, and other parameters as needed (key
+        size, public exponents, curve types, etc..)
 
         Valid options per type, when generating new keys:
          * oct: size(int)
          * RSA: public_exponent(int), size(int)
          * EC: curve(str) (one of P-256, P-384, P-521)
+
+        Deprecated:
+        Alternatively if the 'generate' parameter is provided, with a
+        valid key type as value then a new key will be generated according
+        to the defaults or provided key strenght options (type specific).
 
         :raises InvalidJWKType: if the key type is invalid
         :raises InvalidJWKValue: if incorrect or inconsistent parameters
@@ -185,8 +203,19 @@ class JWK(object):
 
         if 'generate' in kwargs:
             self.generate_key(**kwargs)
-        else:
+        elif kwargs:
             self.import_key(**kwargs)
+
+    @classmethod
+    def generate(cls, **kwargs):
+        obj = cls()
+        try:
+            kty = kwargs['kty']
+            gen = getattr(obj, '_generate_%s' % kty)
+        except (KeyError, AttributeError):
+            raise InvalidJWKType(kty)
+        gen(kwargs)
+        return obj
 
     def generate_key(self, **kwargs):
         params = kwargs.copy()
@@ -210,8 +239,8 @@ class JWK(object):
         self.import_key(**params)
 
     def _encode_int(self, i):
-        I = hex(i).rstrip("L").lstrip("0x")
-        return base64url_encode(unhexlify((len(I) % 2) * '0' + I))
+        intg = hex(i).rstrip("L").lstrip("0x")
+        return base64url_encode(unhexlify((len(intg) % 2) * '0' + intg))
 
     def _generate_RSA(self, params):
         pubexp = 65537
@@ -223,8 +252,11 @@ class JWK(object):
             size = params['size']
             del params['size']
         key = rsa.generate_private_key(pubexp, size, default_backend())
+        self._import_pyca_pri_rsa(key)
+
+    def _import_pyca_pri_rsa(self, key):
         pn = key.private_numbers()
-        params['kty'] = 'RSA'
+        params = {'kty': 'RSA'}
         params['n'] = self._encode_int(pn.public_numbers.n)
         params['e'] = self._encode_int(pn.public_numbers.e)
         params['d'] = self._encode_int(pn.d)
@@ -233,6 +265,13 @@ class JWK(object):
         params['dp'] = self._encode_int(pn.dmp1)
         params['dq'] = self._encode_int(pn.dmq1)
         params['qi'] = self._encode_int(pn.iqmp)
+        self.import_key(**params)
+
+    def _import_pyca_pub_rsa(self, key):
+        pn = key.public_numbers()
+        params = {'kty': 'RSA'}
+        params['n'] = self._encode_int(pn.n)
+        params['e'] = self._encode_int(pn.e)
         self.import_key(**params)
 
     def _get_curve_by_name(self, name):
@@ -257,12 +296,23 @@ class JWK(object):
             del params['crv']
         curve_name = self._get_curve_by_name(curve)
         key = ec.generate_private_key(curve_name, default_backend())
+        self._import_pyca_pri_ec(key)
+
+    def _import_pyca_pri_ec(self, key):
         pn = key.private_numbers()
-        params['kty'] = 'EC'
-        params['crv'] = curve
+        params = {'kty': 'EC'}
+        params['crv'] = JWKpycaCurveMap[key.curve.name]
         params['x'] = self._encode_int(pn.public_numbers.x)
         params['y'] = self._encode_int(pn.public_numbers.y)
         params['d'] = self._encode_int(pn.private_value)
+        self.import_key(**params)
+
+    def _import_pyca_pub_ec(self, key):
+        pn = key.public_numbers()
+        params = {'kty': 'EC'}
+        params['crv'] = JWKpycaCurveMap[key.curve.name]
+        params['x'] = self._encode_int(pn.x)
+        params['y'] = self._encode_int(pn.y)
         self.import_key(**params)
 
     def import_key(self, **kwargs):
@@ -283,6 +333,10 @@ class JWK(object):
                 self._key[name] = kwargs[name]
                 while name in names:
                     names.remove(name)
+
+        for name, val in iteritems(JWKValuesRegistry[kty]):
+            if val[2] == 'Required' and name not in self._key:
+                raise InvalidJWKValue('Missing required value %s' % name)
 
         # Unknown key parameters are allowed
         # Let's just store them out of the way
@@ -320,8 +374,14 @@ class JWK(object):
                                               ' "key_ops" values specified at'
                                               ' the same time')
 
-    def export(self):
-        """Exports the key in the standard JSON format"""
+    def export(self, private_key=True):
+        """Exports the key in the standard JSON format.
+
+        :param private_key(bool): Whether to export the private key.
+                                  Defaults to True.
+        """
+        if private_key is not True:
+            return self.export_public()
         d = dict()
         d.update(self._params)
         d.update(self._key)
@@ -329,7 +389,10 @@ class JWK(object):
         return json_encode(d)
 
     def export_public(self):
-        """Exports the public key in the standard JSON format"""
+        """Exports the public key in the standard JSON format.
+           This function is deprecated and maintained only for
+           backwards compatibility, use export(private_key=False)
+           instead."""
         pub = {}
         preg = JWKParamsRegistry
         for name in preg:
@@ -353,6 +416,13 @@ class JWK(object):
         Provided by the kid parameter if present, otherwise returns None.
         """
         return self._params.get('kid', None)
+
+    @property
+    def key_curve(self):
+        """The Curve Name."""
+        if self._params['kty'] != 'EC':
+            raise InvalidJWKType('Not an EC key')
+        return self._key['crv']
 
     def get_curve(self, arg):
         """Gets the Elliptic Curve associated with the key.
@@ -467,12 +537,40 @@ class JWK(object):
         else:
             raise NotImplementedError
 
+    def import_from_pyca(self, key):
+        if isinstance(key, rsa.RSAPrivateKey):
+            self._import_pyca_pri_rsa(key)
+        elif isinstance(key, rsa.RSAPublicKey):
+            self._import_pyca_pub_rsa(key)
+        elif isinstance(key, ec.EllipticCurvePrivateKey):
+            self._import_pyca_pri_ec(key)
+        elif isinstance(key, ec.EllipticCurvePublicKey):
+            self._import_pyca_pub_ec(key)
+        else:
+            raise InvalidJWKValue('Unknown key object %r' % key)
 
-class JWKSet(set):
-    """A set of JWK objects.
+    @classmethod
+    def from_pyca(cls, key):
+        obj = cls()
+        obj.import_from_pyca(key)
+        return obj
 
-    Inherits for the standard 'set' bultin type.
-    """
+    def thumbprint(self, hashalg=hashes.SHA256()):
+        """Returns the key thumbprint as specified by RFC 7638.
+
+        :param hashalg: A hash function (defaults to SHA256)
+        """
+
+        t = {'kty': self._params['kty']}
+        for name, val in iteritems(JWKValuesRegistry[t['kty']]):
+            if val[2] == 'Required':
+                t[name] = self._key[name]
+        digest = hashes.Hash(hashalg, backend=default_backend())
+        digest.update(bytes(json_encode(t).encode('utf8')))
+        return base64url_encode(digest.finalize())
+
+
+class _JWKkeys(set):
 
     def add(self, elem):
         """Adds a JWK object to the set
@@ -485,18 +583,84 @@ class JWKSet(set):
             raise TypeError('Only JWK objects are valid elements')
         set.add(self, elem)
 
-    def export(self):
-        """Exports the set using the standard JSON format"""
-        keys = list()
-        for jwk in self:
-            keys.append(json_decode(jwk.export()))
-        return json_encode({'keys': keys})
+
+class JWKSet(dict):
+    """A set of JWK objects.
+
+    Inherits from the standard 'dict' bultin type.
+    Creates a special key 'keys' that is of a type derived from 'set'
+    The 'keys' attribute accepts only :class:`jwcrypto.jwk.JWK` elements.
+    """
+    def __init__(self, *args, **kwargs):
+        super(JWKSet, self).__init__()
+        super(JWKSet, self).__setitem__('keys', _JWKkeys())
+        self.update(*args, **kwargs)
+
+    def __setitem__(self, key, val):
+        if key == 'keys':
+            self['keys'].add(val)
+        else:
+            super(JWKSet, self).__setitem__(key, val)
+
+    def update(self, *args, **kwargs):
+        for k, v in iteritems(dict(*args, **kwargs)):
+            self.__setitem__(k, v)
+
+    def add(self, elem):
+        self['keys'].add(elem)
+
+    def export(self, private_keys=True):
+        """Exports a RFC 7517 keyset using the standard JSON format
+
+        :param private_key(bool): Whether to export private keys.
+                                  Defaults to True.
+        """
+        exp_dict = dict()
+        for k, v in iteritems(self):
+            if k == 'keys':
+                keys = list()
+                for jwk in v:
+                    keys.append(json_decode(jwk.export(private_keys)))
+                v = keys
+            exp_dict[k] = v
+        return json_encode(exp_dict)
+
+    def import_keyset(self, keyset):
+        """Imports a RFC 7517 keyset using the standard JSON format.
+
+        :param keyset: The RFC 7517 representation of a JOSE Keyset.
+        """
+        try:
+            jwkset = json_decode(keyset)
+        except:
+            raise InvalidJWKValue()
+
+        if 'keys' not in jwkset:
+            raise InvalidJWKValue()
+
+        for k, v in iteritems(jwkset):
+            if k == 'keys':
+                for jwk in v:
+                    self['keys'].add(JWK(**jwk))
+            else:
+                self[k] = v
+
+        return self
+
+    @classmethod
+    def from_json(cls, keyset):
+        """Creates a RFC 7517 keyset from the standard JSON format.
+
+        :param keyset: The RFC 7517 representation of a JOSE Keyset.
+        """
+        obj = cls()
+        return obj.import_keyset(keyset)
 
     def get_key(self, kid):
         """Gets a key from the set.
         :param kid: the 'kid' key identifier.
         """
-        for jwk in self:
+        for jwk in self['keys']:
             if jwk.key_id == kid:
                 return jwk
         return None

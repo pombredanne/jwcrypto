@@ -1,11 +1,12 @@
 # Copyright (C) 2015  JWCrypto Project Contributors - see LICENSE file
 
-from jwcrypto.common import base64url_decode, base64url_encode
-from jwcrypto.common import json_decode, json_encode
+import unittest
+
+from jwcrypto import jwe
 from jwcrypto import jwk
 from jwcrypto import jws
-from jwcrypto import jwe
-import unittest
+from jwcrypto.common import base64url_decode, base64url_encode
+from jwcrypto.common import json_decode, json_encode
 
 # Based on: RFC 7520
 
@@ -297,11 +298,11 @@ class Cookbook08JWSTests(unittest.TestCase):
             base64url_decode(JWS_Protected_Header_4_1_2).decode('utf-8')
         pub_key = jwk.JWK(**RSA_Public_Key_3_3)
         pri_key = jwk.JWK(**RSA_Private_Key_3_4)
-        S = jws.JWS(payload=plaintext)
-        S.add_signature(pri_key, None, protected)
-        self.assertEqual(JWS_compact_4_1_3, S.serialize(compact=True))
-        S.deserialize(json_encode(JWS_general_4_1_3), pub_key)
-        S.deserialize(json_encode(JWS_flattened_4_1_3), pub_key)
+        s = jws.JWS(payload=plaintext)
+        s.add_signature(pri_key, None, protected)
+        self.assertEqual(JWS_compact_4_1_3, s.serialize(compact=True))
+        s.deserialize(json_encode(JWS_general_4_1_3), pub_key)
+        s.deserialize(json_encode(JWS_flattened_4_1_3), pub_key)
 
     def test_4_2_signing(self):
         plaintext = base64url_decode(Payload_plaintext_b64_4)
@@ -309,16 +310,16 @@ class Cookbook08JWSTests(unittest.TestCase):
             base64url_decode(JWS_Protected_Header_4_2_2).decode('utf-8')
         pub_key = jwk.JWK(**RSA_Public_Key_3_3)
         pri_key = jwk.JWK(**RSA_Private_Key_3_4)
-        S = jws.JWS(payload=plaintext)
-        S.add_signature(pri_key, None, protected)
+        s = jws.JWS(payload=plaintext)
+        s.add_signature(pri_key, None, protected)
         # Can't compare signature with reference because RSASSA-PSS uses
         # random nonces every time a signature is generated.
-        sig = S.serialize()
-        S.deserialize(sig, pub_key)
+        sig = s.serialize()
+        s.deserialize(sig, pub_key)
         # Just deserialize each example form
-        S.deserialize(JWS_compact_4_2_3, pub_key)
-        S.deserialize(json_encode(JWS_general_4_2_3), pub_key)
-        S.deserialize(json_encode(JWS_flattened_4_2_3), pub_key)
+        s.deserialize(JWS_compact_4_2_3, pub_key)
+        s.deserialize(json_encode(JWS_general_4_2_3), pub_key)
+        s.deserialize(json_encode(JWS_flattened_4_2_3), pub_key)
 
     def test_4_3_signing(self):
         plaintext = base64url_decode(Payload_plaintext_b64_4)
@@ -326,31 +327,31 @@ class Cookbook08JWSTests(unittest.TestCase):
             base64url_decode(JWS_Protected_Header_4_3_2).decode('utf-8')
         pub_key = jwk.JWK(**EC_Public_Key_3_1)
         pri_key = jwk.JWK(**EC_Private_Key_3_2)
-        S = jws.JWS(payload=plaintext)
-        S.add_signature(pri_key, None, protected)
+        s = jws.JWS(payload=plaintext)
+        s.add_signature(pri_key, None, protected)
         # Can't compare signature with reference because ECDSA uses
         # random nonces every time a signature is generated.
-        sig = S.serialize()
-        S.deserialize(sig, pub_key)
+        sig = s.serialize()
+        s.deserialize(sig, pub_key)
         # Just deserialize each example form
-        S.deserialize(JWS_compact_4_3_3, pub_key)
-        S.deserialize(json_encode(JWS_general_4_3_3), pub_key)
-        S.deserialize(json_encode(JWS_flattened_4_3_3), pub_key)
+        s.deserialize(JWS_compact_4_3_3, pub_key)
+        s.deserialize(json_encode(JWS_general_4_3_3), pub_key)
+        s.deserialize(json_encode(JWS_flattened_4_3_3), pub_key)
 
     def test_4_4_signing(self):
         plaintext = base64url_decode(Payload_plaintext_b64_4)
         protected = \
             base64url_decode(JWS_Protected_Header_4_4_2).decode('utf-8')
         key = jwk.JWK(**Symmetric_Key_MAC_3_5)
-        S = jws.JWS(payload=plaintext)
-        S.add_signature(key, None, protected)
-        sig = S.serialize(compact=True)
-        S.deserialize(sig, key)
+        s = jws.JWS(payload=plaintext)
+        s.add_signature(key, None, protected)
+        sig = s.serialize(compact=True)
+        s.deserialize(sig, key)
         self.assertEqual(sig, JWS_compact_4_4_3)
         # Just deserialize each example form
-        S.deserialize(JWS_compact_4_4_3, key)
-        S.deserialize(json_encode(JWS_general_4_4_3), key)
-        S.deserialize(json_encode(JWS_flattened_4_4_3), key)
+        s.deserialize(JWS_compact_4_4_3, key)
+        s.deserialize(json_encode(JWS_general_4_4_3), key)
+        s.deserialize(json_encode(JWS_flattened_4_4_3), key)
 
     def test_4_6_signing(self):
         plaintext = base64url_decode(Payload_plaintext_b64_4)
@@ -358,58 +359,58 @@ class Cookbook08JWSTests(unittest.TestCase):
             base64url_decode(JWS_Protected_Header_4_6_2).decode('utf-8')
         header = json_encode(JWS_Unprotected_Header_4_6_2)
         key = jwk.JWK(**Symmetric_Key_MAC_3_5)
-        S = jws.JWS(payload=plaintext)
-        S.add_signature(key, None, protected, header)
-        sig = S.serialize()
-        S.deserialize(sig, key)
+        s = jws.JWS(payload=plaintext)
+        s.add_signature(key, None, protected, header)
+        sig = s.serialize()
+        s.deserialize(sig, key)
         self.assertEqual(json_decode(sig), JWS_flattened_4_6_3)
         # Just deserialize each example form
-        S.deserialize(json_encode(JWS_general_4_6_3), key)
-        S.deserialize(json_encode(JWS_flattened_4_6_3), key)
+        s.deserialize(json_encode(JWS_general_4_6_3), key)
+        s.deserialize(json_encode(JWS_flattened_4_6_3), key)
 
     def test_4_7_signing(self):
         plaintext = base64url_decode(Payload_plaintext_b64_4)
         header = json_encode(JWS_Unprotected_Header_4_7_2)
         key = jwk.JWK(**Symmetric_Key_MAC_3_5)
-        S = jws.JWS(payload=plaintext)
-        S.add_signature(key, None, None, header)
-        sig = S.serialize()
-        S.deserialize(sig, key)
+        s = jws.JWS(payload=plaintext)
+        s.add_signature(key, None, None, header)
+        sig = s.serialize()
+        s.deserialize(sig, key)
         self.assertEqual(json_decode(sig), JWS_flattened_4_7_3)
         # Just deserialize each example form
-        S.deserialize(json_encode(JWS_general_4_7_3), key)
-        S.deserialize(json_encode(JWS_flattened_4_7_3), key)
+        s.deserialize(json_encode(JWS_general_4_7_3), key)
+        s.deserialize(json_encode(JWS_flattened_4_7_3), key)
 
     def test_4_8_signing(self):
         plaintext = base64url_decode(Payload_plaintext_b64_4)
-        S = jws.JWS(payload=plaintext)
+        s = jws.JWS(payload=plaintext)
         # 4_8_2
         protected = \
             base64url_decode(JWS_Protected_Header_4_8_2).decode('utf-8')
         header = json_encode(JWS_Unprotected_Header_4_8_2)
         pri_key = jwk.JWK(**RSA_Private_Key_3_4)
-        S.add_signature(pri_key, None, protected, header)
+        s.add_signature(pri_key, None, protected, header)
         # 4_8_3
         header = json_encode(JWS_Unprotected_Header_4_8_3)
         pri_key = jwk.JWK(**EC_Private_Key_3_2)
-        S.add_signature(pri_key, None, None, header)
+        s.add_signature(pri_key, None, None, header)
         # 4_8_4
         protected = \
             base64url_decode(JWS_Protected_Header_4_8_4).decode('utf-8')
         sym_key = jwk.JWK(**Symmetric_Key_MAC_3_5)
-        S.add_signature(sym_key, None, protected)
-        sig = S.serialize()
+        s.add_signature(sym_key, None, protected)
+        sig = s.serialize()
         # Can't compare signature with reference because ECDSA uses
         # random nonces every time a signature is generated.
         rsa_key = jwk.JWK(**RSA_Public_Key_3_3)
         ec_key = jwk.JWK(**EC_Public_Key_3_1)
-        S.deserialize(sig, rsa_key)
-        S.deserialize(sig, ec_key)
-        S.deserialize(sig, sym_key)
+        s.deserialize(sig, rsa_key)
+        s.deserialize(sig, ec_key)
+        s.deserialize(sig, sym_key)
         # Just deserialize each example form
-        S.deserialize(json_encode(JWS_general_4_8_5), rsa_key)
-        S.deserialize(json_encode(JWS_general_4_8_5), ec_key)
-        S.deserialize(json_encode(JWS_general_4_8_5), sym_key)
+        s.deserialize(json_encode(JWS_general_4_8_5), rsa_key)
+        s.deserialize(json_encode(JWS_general_4_8_5), ec_key)
+        s.deserialize(json_encode(JWS_general_4_8_5), sym_key)
 
 
 # 5.0
@@ -629,75 +630,175 @@ JWE_flattened_5_2_5 = {
     "ciphertext": JWE_Ciphertext_5_2_4,
     "tag": JWE_Authentication_Tag_5_2_4}
 
-# 5.3 - PBES2-* not implemented yet
-# Payload_plaintext_5_3_1 = json_encode({
-#     "keys": [
-#         {"kty": "oct",
-#          "kid": "77c7e2b8-6e13-45cf-8672-617b5b45243a",
-#          "use": "enc",
-#          "alg": "A128GCM",
-#          "k": "XctOhJAkA-pD9Lh7ZgW_2A"},
-#         {"kty": "oct",
-#          "kid": "81b20965-8332-43d9-a468-82160ad91ac8",
-#          "use": "enc",
-#          "alg": "A128KW",
-#          "k": "GZy6sIZ6wl9NJOKB-jnmVQ"},
-#         {"kty": "oct",
-#          "kid": "18ec08e1-bfa9-4d95-b205-2b4dd1d4321d",
-#          "use": "enc",
-#          "alg": "A256GCMKW",
-#          "k": "qC57l_uxcm7Nm3K-ct4GFjx8tM1U8CZ0NLBvdQstiS8"}]})
-#
-# Password_5_3_1 = "entrap_o\xe2\x80\x93peter_long\xe2\x80\x93credit_tun"
-#
-# JWE_IV_5_3_2 = "VBiCzVHNoLiR3F4V82uoTQ"
-#
-# JWE_Encrypted_Key_5_3_3 = \
-#     "d3qNhUWfqheyPp4H8sjOWsDYajoej4c5Je6rlUtFPWdgtURtmeDV1g"
-#
-# JWE_Protected_Header_5_3_4 = \
-#     "eyJhbGciOiJQQkVTMi1IUzUxMitBMjU2S1ciLCJwMnMiOiI4UTFTemluYXNSM3" + \
-#     "hjaFl6NlpaY0hBIiwicDJjIjo4MTkyLCJjdHkiOiJqd2stc2V0K2pzb24iLCJl" + \
-#     "bmMiOiJBMTI4Q0JDLUhTMjU2In0"
-#
-# JWE_Ciphertext_5_3_4 = \
-#     "23i-Tb1AV4n0WKVSSgcQrdg6GRqsUKxjruHXYsTHAJLZ2nsnGIX86vMXqIi6IR" + \
-#     "sfywCRFzLxEcZBRnTvG3nhzPk0GDD7FMyXhUHpDjEYCNA_XOmzg8yZR9oyjo6l" + \
-#     "TF6si4q9FZ2EhzgFQCLO_6h5EVg3vR75_hkBsnuoqoM3dwejXBtIodN84PeqMb" + \
-#     "6asmas_dpSsz7H10fC5ni9xIz424givB1YLldF6exVmL93R3fOoOJbmk2GBQZL" + \
-#     "_SEGllv2cQsBgeprARsaQ7Bq99tT80coH8ItBjgV08AtzXFFsx9qKvC982KLKd" + \
-#     "PQMTlVJKkqtV4Ru5LEVpBZXBnZrtViSOgyg6AiuwaS-rCrcD_ePOGSuxvgtrok" + \
-#     "AKYPqmXUeRdjFJwafkYEkiuDCV9vWGAi1DH2xTafhJwcmywIyzi4BqRpmdn_N-" + \
-#     "zl5tuJYyuvKhjKv6ihbsV_k1hJGPGAxJ6wUpmwC4PTQ2izEm0TuSE8oMKdTw8V" + \
-#     "3kobXZ77ulMwDs4p"
-#
-# JWE_Authentication_Tag_5_3_4 = "0HlwodAhOCILG5SQ2LQ9dg"
-#
-# JWE_compact_5_3_5 = \
-#     "%s.%s.%s.%s.%s" % (JWE_Protected_Header_5_3_4,
-#                         JWE_Encrypted_Key_5_3_3,
-#                         JWE_IV_5_3_2,
-#                         JWE_Ciphertext_5_3_4,
-#                         JWE_Authentication_Tag_5_3_4)
-#
-# JWE_general_5_3_5 = {
-#     "recipients": [{
-#         "encrypted_key": JWE_Encrypted_Key_5_3_3}],
-#     "protected": JWE_Protected_Header_5_3_4,
-#     "iv": JWE_IV_5_3_2,
-#     "ciphertext": JWE_Ciphertext_5_3_4,
-#     "tag": JWE_Authentication_Tag_5_3_4}
-#
-# JWE_flattened_5_3_5 = {
-#     "protected": JWE_Protected_Header_5_3_4,
-#     "encrypted_key": JWE_Encrypted_Key_5_3_3,
-#     "iv": JWE_IV_5_3_2,
-#     "ciphertext": JWE_Ciphertext_5_3_4,
-#     "tag": JWE_Authentication_Tag_5_3_4}
+# 5.3
+Payload_plaintext_5_3_1 = \
+    b'{"keys":[{"kty":"oct","kid":"77c7e2b8-6e13-45cf-8672-617b5b45' + \
+    b'243a","use":"enc","alg":"A128GCM","k":"XctOhJAkA-pD9Lh7ZgW_2A' + \
+    b'"},{"kty":"oct","kid":"81b20965-8332-43d9-a468-82160ad91ac8",' + \
+    b'"use":"enc","alg":"A128KW","k":"GZy6sIZ6wl9NJOKB-jnmVQ"},{"kt' + \
+    b'y":"oct","kid":"18ec08e1-bfa9-4d95-b205-2b4dd1d4321d","use":"' + \
+    b'enc","alg":"A256GCMKW","k":"qC57l_uxcm7Nm3K-ct4GFjx8tM1U8CZ0N' + \
+    b'LBvdQstiS8"}]}'
 
-# 5.4 - ECDH-ES key agreement not implemented yet
+Password_5_3_1 = b'entrap_o\xe2\x80\x93peter_long\xe2\x80\x93credit_tun'
 
-# 5.5 - ECDH-ES key agreement not implemented yet
+JWE_IV_5_3_2 = "VBiCzVHNoLiR3F4V82uoTQ"
+
+JWE_Encrypted_Key_5_3_3 = \
+    "d3qNhUWfqheyPp4H8sjOWsDYajoej4c5Je6rlUtFPWdgtURtmeDV1g"
+
+JWE_Protected_Header_no_p2x = {
+    "alg": "PBES2-HS512+A256KW",
+    "cty": "jwk-set+json",
+    "enc": "A128CBC-HS256"}
+
+JWE_Protected_Header_5_3_4 = \
+    "eyJhbGciOiJQQkVTMi1IUzUxMitBMjU2S1ciLCJwMnMiOiI4UTFTemluYXNSM3" + \
+    "hjaFl6NlpaY0hBIiwicDJjIjo4MTkyLCJjdHkiOiJqd2stc2V0K2pzb24iLCJl" + \
+    "bmMiOiJBMTI4Q0JDLUhTMjU2In0"
+
+JWE_Ciphertext_5_3_4 = \
+    "23i-Tb1AV4n0WKVSSgcQrdg6GRqsUKxjruHXYsTHAJLZ2nsnGIX86vMXqIi6IR" + \
+    "sfywCRFzLxEcZBRnTvG3nhzPk0GDD7FMyXhUHpDjEYCNA_XOmzg8yZR9oyjo6l" + \
+    "TF6si4q9FZ2EhzgFQCLO_6h5EVg3vR75_hkBsnuoqoM3dwejXBtIodN84PeqMb" + \
+    "6asmas_dpSsz7H10fC5ni9xIz424givB1YLldF6exVmL93R3fOoOJbmk2GBQZL" + \
+    "_SEGllv2cQsBgeprARsaQ7Bq99tT80coH8ItBjgV08AtzXFFsx9qKvC982KLKd" + \
+    "PQMTlVJKkqtV4Ru5LEVpBZXBnZrtViSOgyg6AiuwaS-rCrcD_ePOGSuxvgtrok" + \
+    "AKYPqmXUeRdjFJwafkYEkiuDCV9vWGAi1DH2xTafhJwcmywIyzi4BqRpmdn_N-" + \
+    "zl5tuJYyuvKhjKv6ihbsV_k1hJGPGAxJ6wUpmwC4PTQ2izEm0TuSE8oMKdTw8V" + \
+    "3kobXZ77ulMwDs4p"
+
+JWE_Authentication_Tag_5_3_4 = "0HlwodAhOCILG5SQ2LQ9dg"
+
+JWE_compact_5_3_5 = \
+    "%s.%s.%s.%s.%s" % (JWE_Protected_Header_5_3_4,
+                        JWE_Encrypted_Key_5_3_3,
+                        JWE_IV_5_3_2,
+                        JWE_Ciphertext_5_3_4,
+                        JWE_Authentication_Tag_5_3_4)
+
+JWE_general_5_3_5 = {
+    "recipients": [{
+        "encrypted_key": JWE_Encrypted_Key_5_3_3}],
+    "protected": JWE_Protected_Header_5_3_4,
+    "iv": JWE_IV_5_3_2,
+    "ciphertext": JWE_Ciphertext_5_3_4,
+    "tag": JWE_Authentication_Tag_5_3_4}
+
+JWE_flattened_5_3_5 = {
+    "protected": JWE_Protected_Header_5_3_4,
+    "encrypted_key": JWE_Encrypted_Key_5_3_3,
+    "iv": JWE_IV_5_3_2,
+    "ciphertext": JWE_Ciphertext_5_3_4,
+    "tag": JWE_Authentication_Tag_5_3_4}
+
+# 5.4
+EC_key_5_4_1 = {
+    "kty": "EC",
+    "kid": "peregrin.took@tuckborough.example",
+    "use": "enc",
+    "crv": "P-384",
+    "x": "YU4rRUzdmVqmRtWOs2OpDE_T5fsNIodcG8G5FWPrTPMyxpzsSOGaQLpe2FpxBmu2",
+    "y": "A8-yxCHxkfBz3hKZfI1jUYMjUhsEveZ9THuwFjH2sCNdtksRJU7D5-SkgaFL1ETP",
+    "d": "iTx2pk7wW-GqJkHcEkFQb2EFyYcO7RugmaW3mRrQVAOUiPommT0IdnYK2xDlZh-j"}
+
+JWE_IV_5_4_2 = "mH-G2zVqgztUtnW_"
+
+JWE_Encrypted_Key_5_4_3 = \
+    "0DJjBXri_kBcC46IkU5_Jk9BqaQeHdv2"
+
+JWE_Protected_Header_no_epk_5_4_4 = {
+    "alg": "ECDH-ES+A128KW",
+    "kid": "peregrin.took@tuckborough.example",
+    "enc": "A128GCM"}
+
+JWE_Protected_Header_5_4_4 = \
+    "eyJhbGciOiJFQ0RILUVTK0ExMjhLVyIsImtpZCI6InBlcmVncmluLnRvb2tAdH" + \
+    "Vja2Jvcm91Z2guZXhhbXBsZSIsImVwayI6eyJrdHkiOiJFQyIsImNydiI6IlAt" + \
+    "Mzg0IiwieCI6InVCbzRrSFB3Nmtiang1bDB4b3dyZF9vWXpCbWF6LUdLRlp1NH" + \
+    "hBRkZrYllpV2d1dEVLNml1RURzUTZ3TmROZzMiLCJ5Ijoic3AzcDVTR2haVkMy" + \
+    "ZmFYdW1JLWU5SlUyTW84S3BvWXJGRHI1eVBOVnRXNFBnRXdaT3lRVEEtSmRhWT" + \
+    "h0YjdFMCJ9LCJlbmMiOiJBMTI4R0NNIn0"
+
+JWE_Ciphertext_5_4_4 = \
+    "tkZuOO9h95OgHJmkkrfLBisku8rGf6nzVxhRM3sVOhXgz5NJ76oID7lpnAi_cP" + \
+    "WJRCjSpAaUZ5dOR3Spy7QuEkmKx8-3RCMhSYMzsXaEwDdXta9Mn5B7cCBoJKB0" + \
+    "IgEnj_qfo1hIi-uEkUpOZ8aLTZGHfpl05jMwbKkTe2yK3mjF6SBAsgicQDVCkc" + \
+    "Y9BLluzx1RmC3ORXaM0JaHPB93YcdSDGgpgBWMVrNU1ErkjcMqMoT_wtCex3w0" + \
+    "3XdLkjXIuEr2hWgeP-nkUZTPU9EoGSPj6fAS-bSz87RCPrxZdj_iVyC6QWcqAu" + \
+    "07WNhjzJEPc4jVntRJ6K53NgPQ5p99l3Z408OUqj4ioYezbS6vTPlQ"
+
+JWE_Authentication_Tag_5_4_4 = "WuGzxmcreYjpHGJoa17EBg"
+
+JWE_compact_5_4_5 = \
+    "%s.%s.%s.%s.%s" % (JWE_Protected_Header_5_4_4,
+                        JWE_Encrypted_Key_5_4_3,
+                        JWE_IV_5_4_2,
+                        JWE_Ciphertext_5_4_4,
+                        JWE_Authentication_Tag_5_4_4)
+
+JWE_general_5_4_5 = {
+    "recipients": [{
+        "encrypted_key": JWE_Encrypted_Key_5_4_3}],
+    "protected": JWE_Protected_Header_5_4_4,
+    "iv": JWE_IV_5_4_2,
+    "ciphertext": JWE_Ciphertext_5_4_4,
+    "tag": JWE_Authentication_Tag_5_4_4}
+
+JWE_flattened_5_4_5 = {
+    "protected": JWE_Protected_Header_5_4_4,
+    "encrypted_key": JWE_Encrypted_Key_5_4_3,
+    "iv": JWE_IV_5_4_2,
+    "ciphertext": JWE_Ciphertext_5_4_4,
+    "tag": JWE_Authentication_Tag_5_4_4}
+
+# 5.5
+EC_key_5_5_1 = {
+    "kty": "EC",
+    "kid": "meriadoc.brandybuck@buckland.example",
+    "use": "enc",
+    "crv": "P-256",
+    "x": "Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0",
+    "y": "HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw",
+    "d": "r_kHyZ-a06rmxM3yESK84r1otSg-aQcVStkRhA-iCM8"}
+
+JWE_IV_5_5_2 = "yc9N8v5sYyv3iGQT926IUg"
+
+JWE_Protected_Header_no_epk_5_5_4 = {
+    "alg": "ECDH-ES",
+    "kid": "meriadoc.brandybuck@buckland.example",
+    "enc": "A128CBC-HS256"
+}
+
+JWE_Protected_Header_5_5_4 = \
+    "eyJhbGciOiJFQ0RILUVTIiwia2lkIjoibWVyaWFkb2MuYnJhbmR5YnVja0BidW" + \
+    "NrbGFuZC5leGFtcGxlIiwiZXBrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYi" + \
+    "LCJ4IjoibVBVS1RfYkFXR0hJaGcwVHBqanFWc1AxclhXUXVfdndWT0hIdE5rZF" + \
+    "lvQSIsInkiOiI4QlFBc0ltR2VBUzQ2ZnlXdzVNaFlmR1RUMElqQnBGdzJTUzM0" + \
+    "RHY0SXJzIn0sImVuYyI6IkExMjhDQkMtSFMyNTYifQ"
+
+JWE_Ciphertext_5_5_4 = \
+    "BoDlwPnTypYq-ivjmQvAYJLb5Q6l-F3LIgQomlz87yW4OPKbWE1zSTEFjDfhU9" + \
+    "IPIOSA9Bml4m7iDFwA-1ZXvHteLDtw4R1XRGMEsDIqAYtskTTmzmzNa-_q4F_e" + \
+    "vAPUmwlO-ZG45Mnq4uhM1fm_D9rBtWolqZSF3xGNNkpOMQKF1Cl8i8wjzRli7-" + \
+    "IXgyirlKQsbhhqRzkv8IcY6aHl24j03C-AR2le1r7URUhArM79BY8soZU0lzwI" + \
+    "-sD5PZ3l4NDCCei9XkoIAfsXJWmySPoeRb2Ni5UZL4mYpvKDiwmyzGd65KqVw7" + \
+    "MsFfI_K767G9C9Azp73gKZD0DyUn1mn0WW5LmyX_yJ-3AROq8p1WZBfG-ZyJ61" + \
+    "95_JGG2m9Csg"
+
+JWE_Authentication_Tag_5_5_4 = "WCCkNa-x4BeB9hIDIfFuhg"
+
+JWE_compact_5_5_5 = \
+    "%s..%s.%s.%s" % (JWE_Protected_Header_5_5_4,
+                      JWE_IV_5_5_2,
+                      JWE_Ciphertext_5_5_4,
+                      JWE_Authentication_Tag_5_5_4)
+
+JWE_general_5_5_5 = {
+    "protected": JWE_Protected_Header_5_5_4,
+    "iv": JWE_IV_5_5_2,
+    "ciphertext": JWE_Ciphertext_5_5_4,
+    "tag": JWE_Authentication_Tag_5_5_4}
 
 # 5.6
 AES_key_5_6_1 = {
@@ -736,6 +837,60 @@ JWE_general_5_6_4 = {
     "tag": JWE_Authentication_Tag_5_6_3}
 
 # 5.7 - A256GCMKW not implemented yet
+AES_key_5_7_1 = {
+    "kty": "oct",
+    "kid": "18ec08e1-bfa9-4d95-b205-2b4dd1d4321d",
+    "use": "enc",
+    "alg": "A256GCMKW",
+    "k": "qC57l_uxcm7Nm3K-ct4GFjx8tM1U8CZ0NLBvdQstiS8"}
+
+JWE_IV_5_7_2 = "gz6NjyEFNm_vm8Gj6FwoFQ"
+
+JWE_Encrypted_Key_5_7_3 = "lJf3HbOApxMEBkCMOoTnnABxs_CvTWUmZQ2ElLvYNok"
+
+JWE_Protected_Header_no_ivtag = {
+    "alg": "A256GCMKW",
+    "kid": "18ec08e1-bfa9-4d95-b205-2b4dd1d4321d",
+    "enc": "A128CBC-HS256"}
+
+JWE_Protected_Header_5_7_4 = \
+    "eyJhbGciOiJBMjU2R0NNS1ciLCJraWQiOiIxOGVjMDhlMS1iZmE5LTRkOTUtYj" + \
+    "IwNS0yYjRkZDFkNDMyMWQiLCJ0YWciOiJrZlBkdVZRM1QzSDZ2bmV3dC0ta3N3" + \
+    "IiwiaXYiOiJLa1lUMEdYXzJqSGxmcU5fIiwiZW5jIjoiQTEyOENCQy1IUzI1Ni" + \
+    "J9"
+
+JWE_Ciphertext_5_7_4 = \
+    "Jf5p9-ZhJlJy_IQ_byKFmI0Ro7w7G1QiaZpI8OaiVgD8EqoDZHyFKFBupS8iaE" + \
+    "eVIgMqWmsuJKuoVgzR3YfzoMd3GxEm3VxNhzWyWtZKX0gxKdy6HgLvqoGNbZCz" + \
+    "LjqcpDiF8q2_62EVAbr2uSc2oaxFmFuIQHLcqAHxy51449xkjZ7ewzZaGV3eFq" + \
+    "hpco8o4DijXaG5_7kp3h2cajRfDgymuxUbWgLqaeNQaJtvJmSMFuEOSAzw9Hde" + \
+    "b6yhdTynCRmu-kqtO5Dec4lT2OMZKpnxc_F1_4yDJFcqb5CiDSmA-psB2k0Jtj" + \
+    "xAj4UPI61oONK7zzFIu4gBfjJCndsZfdvG7h8wGjV98QhrKEnR7xKZ3KCr0_qR" + \
+    "1B-gxpNk3xWU"
+
+JWE_Authentication_Tag_5_7_4 = "DKW7jrb4WaRSNfbXVPlT5g"
+
+JWE_compact_5_7_5 = \
+    "%s.%s.%s.%s.%s" % (JWE_Protected_Header_5_7_4,
+                        JWE_Encrypted_Key_5_7_3,
+                        JWE_IV_5_7_2,
+                        JWE_Ciphertext_5_7_4,
+                        JWE_Authentication_Tag_5_7_4)
+
+JWE_general_5_7_5 = {
+    "recipients": [{
+        "encrypted_key": JWE_Encrypted_Key_5_7_3}],
+    "protected": JWE_Protected_Header_5_7_4,
+    "iv": JWE_IV_5_7_2,
+    "ciphertext": JWE_Ciphertext_5_7_4,
+    "tag": JWE_Authentication_Tag_5_7_4}
+
+JWE_flattened_5_7_5 = {
+    "protected": JWE_Protected_Header_5_7_4,
+    "encrypted_key": JWE_Encrypted_Key_5_7_3,
+    "iv": JWE_IV_5_7_2,
+    "ciphertext": JWE_Ciphertext_5_7_4,
+    "tag": JWE_Authentication_Tag_5_7_4}
 
 # 5.8
 AES_key_5_8_1 = {
@@ -946,7 +1101,7 @@ JWE_flattened_5_12_5 = {
 
 # In general we can't compare ciphertexts with the reference because
 # either the algorithms use random nonces to authenticate the ciphertext
-# or we randomly genrate the nonce when we create the JWE.
+# or we randomly genrate the nonce when we create the JWe.
 # To double check implementation we encrypt/decrypt our own input and then
 # decrypt the reference and check it against the given plaintext
 class Cookbook08JWETests(unittest.TestCase):
@@ -955,136 +1110,184 @@ class Cookbook08JWETests(unittest.TestCase):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_1_4)
         rsa_key = jwk.JWK(**RSA_key_5_1_1)
-        E = jwe.JWE(plaintext, protected)
-        E.add_recipient(rsa_key)
-        e = E.serialize()
-        E.deserialize(e, rsa_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(JWE_compact_5_1_5, rsa_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_1_5), rsa_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_1_5), rsa_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(rsa_key)
+        enc = e.serialize()
+        e.deserialize(enc, rsa_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_1_5, rsa_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_1_5), rsa_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_1_5), rsa_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_2_encryption(self):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_2_4)
         rsa_key = jwk.JWK(**RSA_key_5_2_1)
-        E = jwe.JWE(plaintext, protected)
-        E.add_recipient(rsa_key)
-        e = E.serialize()
-        E.deserialize(e, rsa_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(JWE_compact_5_2_5, rsa_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_2_5), rsa_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_2_5), rsa_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(rsa_key)
+        enc = e.serialize()
+        e.deserialize(enc, rsa_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_2_5, rsa_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_2_5), rsa_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_2_5), rsa_key)
+        self.assertEqual(e.payload, plaintext)
 
-# 5.3 - PBES2-* not implemented yet
-#     def test_5_3_encryption(self):
+    def test_5_3_encryption(self):
+        plaintext = Payload_plaintext_5_3_1
+        password = Password_5_3_1
+        unicodepwd = Password_5_3_1.decode('utf8')
+        e = jwe.JWE(plaintext, json_encode(JWE_Protected_Header_no_p2x))
+        e.add_recipient(password)
+        e.serialize(compact=True)
+        enc = e.serialize()
+        e.deserialize(enc, unicodepwd)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_3_5, password)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_3_5), unicodepwd)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_3_5), password)
+        self.assertEqual(e.payload, plaintext)
 
-# 5.4 - ECDH-ES key agreement not implemented yet
-#     def test_5_4_encryption(self):
+    def test_5_4_encryption(self):
+        plaintext = Payload_plaintext_5
+        protected = json_encode(JWE_Protected_Header_no_epk_5_4_4)
+        ec_key = jwk.JWK(**EC_key_5_4_1)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(ec_key)
+        enc = e.serialize(compact=True)
+        e.deserialize(enc, ec_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_4_5, ec_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_4_5), ec_key)
+        self.assertEqual(e.payload, plaintext)
 
-# 5.5 - ECDH-ES key agreement not implemented yet
-#     def test_5_5_encryption(self):
+    def test_5_5_encryption(self):
+        plaintext = Payload_plaintext_5
+        protected = json_encode(JWE_Protected_Header_no_epk_5_5_4)
+        ec_key = jwk.JWK(**EC_key_5_5_1)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(ec_key)
+        enc = e.serialize(compact=True)
+        e.deserialize(enc, ec_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_5_5, ec_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_5_5), ec_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_6_encryption(self):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_6_3)
         aes_key = jwk.JWK(**AES_key_5_6_1)
-        E = jwe.JWE(plaintext, protected)
-        E.add_recipient(aes_key)
-        _ = E.serialize(compact=True)
-        e = E.serialize()
-        E.deserialize(e, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(JWE_compact_5_6_4, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_6_4), aes_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(aes_key)
+        e.serialize(compact=True)
+        enc = e.serialize()
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_6_4, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_6_4), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
-# 5.7 - AES-GCM key wrapping not implemented yet
-#     def test_5_7_encryption(self):
+    def test_5_7_encryption(self):
+        plaintext = Payload_plaintext_5
+        aes_key = jwk.JWK(**AES_key_5_7_1)
+        e = jwe.JWE(plaintext, json_encode(JWE_Protected_Header_no_ivtag))
+        e.add_recipient(aes_key)
+        enc = e.serialize(compact=True)
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_7_5, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_7_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_7_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_8_encryption(self):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_8_4)
         aes_key = jwk.JWK(**AES_key_5_8_1)
-        E = jwe.JWE(plaintext, protected)
-        E.add_recipient(aes_key)
-        e = E.serialize()
-        E.deserialize(e, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(JWE_compact_5_8_5, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_8_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_8_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(aes_key)
+        enc = e.serialize()
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_8_5, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_8_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_8_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_9_encryption(self):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_9_4)
         aes_key = jwk.JWK(**AES_key_5_8_1)
-        E = jwe.JWE(plaintext, protected)
-        E.add_recipient(aes_key)
-        e = E.serialize()
-        E.deserialize(e, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(JWE_compact_5_9_5, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_9_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_9_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected)
+        e.add_recipient(aes_key)
+        enc = e.serialize()
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(JWE_compact_5_9_5, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_9_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_9_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_10_encryption(self):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_10_4)
         aad = base64url_decode(AAD_5_10_1)
         aes_key = jwk.JWK(**AES_key_5_8_1)
-        E = jwe.JWE(plaintext, protected, aad=aad)
-        E.add_recipient(aes_key)
-        e = E.serialize()
-        E.deserialize(e, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_10_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_10_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected, aad=aad)
+        e.add_recipient(aes_key)
+        enc = e.serialize()
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_10_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_10_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_11_encryption(self):
         plaintext = Payload_plaintext_5
         protected = base64url_decode(JWE_Protected_Header_5_11_4)
         unprotected = json_encode(JWE_Unprotected_Header_5_11_5)
         aes_key = jwk.JWK(**AES_key_5_8_1)
-        E = jwe.JWE(plaintext, protected, unprotected)
-        E.add_recipient(aes_key)
-        e = E.serialize()
-        E.deserialize(e, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_11_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_11_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, protected, unprotected)
+        e.add_recipient(aes_key)
+        enc = e.serialize()
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_11_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_11_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
     def test_5_12_encryption(self):
         plaintext = Payload_plaintext_5
         unprotected = json_encode(JWE_Unprotected_Header_5_12_5)
         aes_key = jwk.JWK(**AES_key_5_8_1)
-        E = jwe.JWE(plaintext, None, unprotected)
-        E.add_recipient(aes_key)
-        e = E.serialize()
-        E.deserialize(e, aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_general_5_12_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
-        E.deserialize(json_encode(JWE_flattened_5_12_5), aes_key)
-        self.assertEqual(E.payload, plaintext)
+        e = jwe.JWE(plaintext, None, unprotected)
+        e.add_recipient(aes_key)
+        enc = e.serialize()
+        e.deserialize(enc, aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_general_5_12_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
+        e.deserialize(json_encode(JWE_flattened_5_12_5), aes_key)
+        self.assertEqual(e.payload, plaintext)
 
 # 5.13 - AES-GCM key wrapping not implemented yet
 #     def test_5_13_encryption(self):
